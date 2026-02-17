@@ -1,0 +1,28 @@
+﻿{
+    "media":  [
+                  {
+                      "path":  "Images/1.jpg",
+                      "isVideo":  false
+                  },
+                  {
+                      "path":  "Images/2.jpg",
+                      "isVideo":  false
+                  },
+                  {
+                      "path":  "Images/4.jpg",
+                      "isVideo":  false
+                  },
+                  {
+                      "path":  "Images/5.jpg",
+                      "isVideo":  false
+                  },
+                  {
+                      "path":  "Images/6.mp4",
+                      "isVideo":  true
+                  },
+                  {
+                      "path":  "Images/photo7.jpg",
+                      "isVideo":  false
+                  }
+              ]
+}

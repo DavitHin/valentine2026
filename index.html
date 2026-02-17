@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Verification Required</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://accounts.google.com">
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Hanuman:wght@400;700&family=Nunito:wght@300;600;800&family=Playfair+Display:ital@1&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+    <div id="atmosphere"></div>
+
+    <!-- HTML5 Audio Player (NO YOUTUBE = NO ADS!) -->
+    <audio id="bg-music" preload="auto" loop></audio>
+    <audio id="panic-sound" preload="auto"></audio>
+
+    <div id="screen-verify" class="scene">
+        <div class="intro-card verify-card">
+            <h1 class="title">Identity Check</h1>
+            <p style="margin-bottom: 20px;">Please prove you are my wife.</p>
+
+            <form id="verify-form" onsubmit="event.preventDefault(); checkAnswers();">
+                
+                <div class="input-group">
+                    <label>1. When was our first Valentine's Day?</label>
+                    <div class="date-columns">
+                        <input type="text" id="valentine-day" placeholder="DD" maxlength="2" inputmode="numeric" data-min="1" data-max="31" required>
+                        <input type="text" id="valentine-month" placeholder="MM" maxlength="2" inputmode="numeric" data-min="1" data-max="12" required>
+                        <input type="text" id="valentine-year" placeholder="YYYY" maxlength="4" inputmode="numeric" data-min="1900" data-max="2100" required>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>2. When was our Wedding Day?</label>
+                    <div class="date-columns">
+                        <input type="text" id="wedding-day" placeholder="DD" maxlength="2" inputmode="numeric" data-min="1" data-max="31" required>
+                        <input type="text" id="wedding-month" placeholder="MM" maxlength="2" inputmode="numeric" data-min="1" data-max="12" required>
+                        <input type="text" id="wedding-year" placeholder="YYYY" maxlength="4" inputmode="numeric" data-min="1900" data-max="2100" required>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>3. Why do you love your husband?</label>
+                    <textarea id="txt-reason" placeholder="Type your answer here..." rows="3" required></textarea>
+                </div>
+
+                <div class="input-group">
+                    <label>4. Where do you want to eat?</label>
+                    <textarea id="txt-food" placeholder="Restaurant name or food type..." rows="2" required></textarea>
+                </div>
+
+                <div class="input-group">
+                    <label>Select Background Mood</label>
+                    <div class="vibe-selector">
+                        <label class="vibe-option">
+                            <input type="radio" name="music-vibe" value="funny">
+                            <span>Funny</span>
+                        </label>
+                        <label class="vibe-option">
+                            <input type="radio" name="music-vibe" value="romantic" checked>
+                            <span>Romantic</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="error-msg" class="hidden">Access denied. You are not my wife.</div>
+                
+                <button type="submit" class="btn btn-yes unlocked" style="width: 100%; margin-top: 20px;">Verify Identity</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="screen-trap" class="scene hidden">
+        <div class="intro-card">
+            <h1 class="title">Access Granted</h1>
+            <p style="font-size: 1.2rem; color: #555;">Now, I have one important question...</p>
+            <h2 class="title" style="margin-top: 20px;">Will you be my Valentine?</h2>
+            
+            <div class="btn-group">
+                <button id="btn-yes" class="btn btn-yes locked">YES, Forever!</button>
+                <button id="btn-no" class="btn btn-no">No</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-main" class="scene hidden">
+        <div class="main-card">
+            <h1 class="title" style="font-size: 3rem;">I Knew It!</h1>
+            <p>You are my sunshine, my joy, and my greatest adventure.</p>
+            
+            <div id="timer" class="timer-display">Counting our love story...</div>
+
+            <!-- FIXED MUSIC PLAYER UI -->
+            <div id="music-player-ui" class="music-player-ui hidden">
+                <div class="music-player-container">
+                    <div class="player-top-row">
+                        <div class="player-icon">🎵</div>
+                        <div class="player-text-info">
+                            <div class="track-title" id="track-title">Loading...</div>
+                            <div class="track-subtitle">
+                                <span class="mood-label" id="mood-label">Romantic</span>
+                                <span class="track-separator">•</span>
+                                <span class="track-position" id="track-position">Track 1/3</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="player-controls-row">
+                        <div class="mood-buttons">
+                            <button class="mood-switch-btn active" data-mood="romantic" id="mood-romantic-btn" type="button" title="Romantic">
+                                💕
+                            </button>
+                            <button class="mood-switch-btn" data-mood="funny" id="mood-funny-btn" type="button" title="Funny">
+                                😊
+                            </button>
+                        </div>
+                        
+                        <div class="playback-controls">
+                            <button class="player-btn" id="player-prev-btn" type="button" title="Previous">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                                </svg>
+                            </button>
+                            <button class="player-btn player-btn-main" id="player-play-btn" type="button" title="Play/Pause">
+                                <svg class="icon-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5v14l11-7z"/>
+                                </svg>
+                                <svg class="icon-pause hidden" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                                </svg>
+                            </button>
+                            <button class="player-btn" id="player-next-btn" type="button" title="Next">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M16 18h2V6h-2zm-11-7l8.5-6v12z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="love-letter-section">
+                <h3 style="color: var(--primary); margin-bottom: 15px; font-family: 'Dancing Script'; font-size: 2rem;">A Note for You...</h3>
+                <div id="typewriter" class="letter-paper"></div>
+            </div>
+
+            
+            <div id="drive-auth" class="drive-auth hidden">
+                <div class="drive-auth-card">
+                    <div class="drive-auth-title">🔒 Private Gallery</div>
+                    <div id="drive-auth-status" class="drive-auth-status">Sign in to view our photos/videos from Google Drive.</div>
+                    <button id="drive-signin-btn" class="btn btn-primary" type="button">Sign in with Google</button>
+                    <div class="drive-auth-hint">Only accounts I shared the Drive folder with can see this. 🌻</div>
+                </div>
+            </div>
+            <div class="media-quality-bar">
+                <label for="media-quality">Media quality:</label>
+                <select id="media-quality">
+                    <option value="hd">HD (save data)</option>
+                    <option value="fhd">Full HD</option>
+                    <option value="original">Original</option>
+                </select>
+            </div>
+            <div class="gallery-grid" id="gallery-root"></div>
+
+            <footer style="margin-top: 40px; font-size: 0.9rem; color: #888;">
+                Forever yours, <br> <b>Your Husband</b>
+            </footer>
+        </div>
+    </div>
+
+    <button id="app-signout-btn" class="btn btn-no hidden app-signout-btn" type="button">Sign Out</button>
+
+    <div id="lightbox">
+        <button class="lightbox-nav prev" id="lb-prev" type="button" aria-label="Previous media">‹</button>
+        <div id="lb-media-container"></div>
+        <button class="lightbox-nav next" id="lb-next" type="button" aria-label="Next media">›</button>
+    </div>
+
+    <div id="panic-modal" class="panic-modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="panic-title">
+        <div class="panic-card">
+            <h2 id="panic-title">NOT MY WIFE: ACCESS BLOCKED</h2>
+            <p>Identity mismatch detected. This page is only for my wife. Alarm stays active until dismiss.</p>
+            <button id="panic-close" type="button" class="btn btn-no">Dismiss Alarm</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
