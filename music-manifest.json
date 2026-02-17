@@ -1,0 +1,12 @@
+{
+  "romantic": [
+    { "path": "music/romantic/1.mp3", "title": "A Thousand Years" },
+    { "path": "music/romantic/2.mp3", "title": "Perfect" },
+    { "path": "music/romantic/3.mp3", "title": "All of Me" }
+  ],
+  "funny": [
+    { "path": "music/funny/1.mp3", "title": "Never Gonna Give You Up" },
+    { "path": "music/funny/2.mp3", "title": "What Does The Fox Say" },
+    { "path": "music/funny/3.mp3", "title": "Hamster Dance" }
+  ]
+}

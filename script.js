@@ -28,19 +28,32 @@ const CONFIG = {
     valentineDate: "2022-02-14",
     weddingDate: "2025-01-05",
     music: {
-        autoDetect: true,
-        recursiveScan: true,
+        /* HOW TO ADD MUSIC:
+         * 1. Create music/music-manifest.json (fastest, zero 404s)
+         * 2. OR just drop MP3s in music/romantic/ and music/funny/
+         *    and the scanner will find them automatically.
+         *
+         * music-manifest.json example:
+         * {
+         *   "romantic": [
+         *     { "path": "music/romantic/1.mp3", "title": "A Thousand Years" },
+         *     { "path": "music/romantic/2.mp3", "title": "Perfect" }
+         *   ],
+         *   "funny": [
+         *     { "path": "music/funny/1.mp3", "title": "Never Gonna Give You Up" }
+         *   ]
+         * }
+         */
+        manifestPath: "music/music-manifest.json",
+        fallbackScan: true,          // Scan folders if no manifest
         folders: {
             romantic: "music/romantic/",
             funny: "music/funny/"
         },
         panicSound: "music/panic.mp3",
-        // Performance settings
-        maxDepth: 5,
-        maxFilesPerMood: 100,
+        scanMaxPerFolder: 20,         // Only probe 1.mp3 - 20.mp3 (not hundreds)
         cacheEnabled: true,
-        cacheExpiryHours: 24,
-        scanBatchSize: 10
+        cacheExpiryHours: 24
     },
     rainItems: ["\uD83C\uDF39", "\uD83C\uDF3B", "\uD83D\uDC90", "\uD83C\uDF38", "\uD83C\uDF3C", "\u2764\uFE0F", "\uD83D\uDC95", "💵", "🍷"],
     loveLetter: `My Dearest Wife,
@@ -453,7 +466,6 @@ function showVerifyScene() {
     document.getElementById("screen-trap").classList.add("hidden");
     document.getElementById("screen-main").classList.add("hidden");
     appSignOutBtn && appSignOutBtn.classList.add("hidden");
-    verificationAudioWarmed = false;
 }
 
 function showTrapScene() {
@@ -478,17 +490,16 @@ function showMainScene() {
 
 function signOutApp() {
     shouldResumeSelectedMusicOnGesture = false;
-    clearBackgroundMusicRecoveryTimer();
-    clearMusicAutoRetryTimer();
     stopMusicStatePersistence();
     clearAppSession();
     clearMusicPlaybackState();
     clearVerifyFormDraft();
-    
-    // Stop ALL audio sources before sign out
-    stopAlertToneFallback();
-    stopFunnyToneFallback();
-    
+
+    // Stop all audio
+    pauseMusic();
+    stopPanicAudio();
+    panicMode = false;
+
     hidePanicAlert();
     noCount = 0;
     noRecentTargets.length = 0;
@@ -508,18 +519,9 @@ function signOutApp() {
     }
     iLetter = 0;
     
-    if (isPlayerReady && player && player.stopVideo) {
-        player.stopVideo();
-        isMusicPlaying = false;
-    }
-    
-    // Reset audio state completely
-    panicMode = false;
-    pendingAudioMode = null;
+    // Reset audio state
     selectedErrorCount = 0;
     audioPrimed = false;
-    pendingMusicResumeState = null;
-    verificationAudioWarmed = false;
 
     if (typeof signOutDrive === "function") {
         signOutDrive();
@@ -545,49 +547,15 @@ function restoreAuthorizedSession() {
         autoDiscoverMedia();
         startTimer();
         const letterEl = document.getElementById("typewriter");
-        if (letterEl) {
-            letterEl.innerHTML = "";
-        }
+        if (letterEl) letterEl.innerHTML = "";
         iLetter = 0;
         setTimeout(typeWriter, 350);
-        
-        // Improved music restoration on refresh
-        if (isPlayerReady && player) {
-            // Player ready - play immediately with small delay
-            setTimeout(() => {
-                requestMusicAutoplay("restore-main", 4, 900);
-            }, 300);
-        } else {
-            // Player not ready - queue it and retry
-            pendingAudioMode = "selected";
-            shouldResumeSelectedMusicOnGesture = true;
-            setTimeout(() => {
-                if (!isMusicPlaying && !panicMode && isPlayerReady) {
-                    requestMusicAutoplay("restore-main-late", 4, 900);
-                }
-            }, 1500);
-        }
-        scheduleBackgroundMusicRecovery(3000);
+        setTimeout(() => { if (!isMusicPlaying && !panicMode) playSelectedMusic(); }, 500);
         return true;
     }
 
     showTrapScene();
-    
-    // Same improvements for trap scene
-    if (isPlayerReady && player) {
-        setTimeout(() => {
-            requestMusicAutoplay("restore-trap", 3, 900);
-        }, 300);
-    } else {
-        pendingAudioMode = "selected";
-        shouldResumeSelectedMusicOnGesture = true;
-        setTimeout(() => {
-            if (!isMusicPlaying && !panicMode && isPlayerReady) {
-                requestMusicAutoplay("restore-trap-late", 3, 900);
-            }
-        }, 1500);
-    }
-    scheduleBackgroundMusicRecovery(3000);
+    setTimeout(() => { if (!isMusicPlaying && !panicMode) playSelectedMusic(); }, 500);
     return true;
 }
 
@@ -673,8 +641,7 @@ async function checkAnswers() {
     clearVerifyFormDraft();
     saveAppSession("trap", vibe);
     showTrapScene();
-    requestMusicAutoplay("verify-success", 4, 900);
-    scheduleBackgroundMusicRecovery(3000);
+    setTimeout(() => { if (!isMusicPlaying && !panicMode) playSelectedMusic(); }, 300);
 
     submitAnswers({
         reason: txtReason || "(not provided)",
@@ -794,41 +761,19 @@ function persistAnswersFallback(record) {
 function showPanicAlert() {
     panicModal.classList.remove("hidden");
     saveMusicPlaybackState(true);
-    
-    // Stop mood music BEFORE starting panic
-    if (isPlayerReady && player && isMusicPlaying) {
-        player.stopVideo();
-        isMusicPlaying = false;
-    }
-    
-    stopFunnyToneFallback();
-    stopAlertToneFallback();
-    
     playPanicAlert();
 }
 
 function hidePanicAlert() {
     panicModal.classList.add("hidden");
-    stopPanicLoopGuard();
-
     if (panicMode) {
         panicMode = false;
-        
-        // Properly stop all panic audio
-        stopAlertToneFallback();
-        
-        if (isPlayerReady && player && player.stopVideo) {
-            player.stopVideo();
-            isMusicPlaying = false;
-            
-            // Resume mood music after delay
-            setTimeout(() => {
-                if (!panicMode && isRomanceSceneVisible()) {
-                    cueSelectedMusic();
-                    playSelectedMusic();
-                }
-            }, 500);
-        }
+        stopPanicAudio();
+        setTimeout(() => {
+            if (!panicMode && isRomanceSceneVisible()) {
+                playSelectedMusic();
+            }
+        }, 500);
     }
 }
 
@@ -840,267 +785,171 @@ panicModal.addEventListener("click", (event) => {
 });
 
 /* ==========================================
-   YouTube music reliability
+   MP3 Music Player State - (variables declared in block below)
    ========================================== */
 
 /* ==========================================
-   🎵 MP3 MUSIC PLAYER - Replaces YouTube
-   AUTO-DETECTION | RECURSIVE SCAN | NO ADS
+   🎵 MANIFEST-FIRST MP3 LOADER
+   Uses music-manifest.json for instant loading (zero 404s)
+   Falls back to simple folder scan if no manifest found
    ========================================== */
 
-// MP3 Player State
-let bgMusicElement = null;
-let panicSoundElement = null;
-let isMusicPlaying = false;
-let panicMode = false;
-let currentMood = "romantic";
-let currentTrackIndex = 0;
-let musicTracks = { romantic: [], funny: [] };
-
-// Keep these - used by other features
-let audioPrimed = false;
-let shouldResumeSelectedMusicOnGesture = false;
-let musicStateSaveTimerId = null;
-let selectedErrorCount = 0;
-
-// Cache keys
-const MUSIC_CACHE_KEY = "valentine_music_files_cache";
-const MUSIC_CACHE_TIMESTAMP_KEY = "valentine_music_cache_timestamp";
-
-/* MP3 Auto-Detection with Recursive Scanning */
 async function autoDetectMusicFiles() {
-    if (!CONFIG.music.autoDetect) return;
-    
+    // Check localStorage cache first
     if (CONFIG.music.cacheEnabled && loadCachedMusicFiles()) {
-        console.log('✅ Loaded music from cache');
+        console.log("✅ Loaded music from cache");
         return;
     }
-    
-    console.log('🔍 Starting' + (CONFIG.music.recursiveScan ? ' RECURSIVE' : '') + ' MP3 scan...');
-    
-    try {
-        if (CONFIG.music.recursiveScan) {
-            musicTracks.romantic = await scanFolderRecursive(CONFIG.music.folders.romantic, 0, CONFIG.music.maxDepth || 5, CONFIG.music.maxFilesPerMood || 100);
-            musicTracks.funny = await scanFolderRecursive(CONFIG.music.folders.funny, 0, CONFIG.music.maxDepth || 5, CONFIG.music.maxFilesPerMood || 100);
-        } else {
-            musicTracks.romantic = await detectMP3FilesInFolder(CONFIG.music.folders.romantic);
-            musicTracks.funny = await detectMP3FilesInFolder(CONFIG.music.folders.funny);
-        }
-        
-        console.log(`✅ Found ${musicTracks.romantic.length} romantic + ${musicTracks.funny.length} funny songs`);
-        
+
+    // Try manifest file first (fastest, zero 404 spam)
+    const loaded = await tryLoadManifest();
+    if (loaded) return;
+
+    // Fallback: simple folder scan
+    if (CONFIG.music.fallbackScan) {
+        console.log("📂 No manifest found, scanning folders...");
+        musicTracks.romantic = await probeFolderForMP3s(CONFIG.music.folders.romantic);
+        musicTracks.funny    = await probeFolderForMP3s(CONFIG.music.folders.funny);
+    }
+
+    if (musicTracks.romantic.length === 0 && musicTracks.funny.length === 0) {
+        console.warn("⚠️ No MP3 files found. Add music/music-manifest.json or MP3 files.");
+    } else {
+        console.log(`✅ Found ${musicTracks.romantic.length} romantic + ${musicTracks.funny.length} funny`);
         if (CONFIG.music.cacheEnabled) saveMusicCache();
-        if (musicTracks.romantic.length === 0 && musicTracks.funny.length === 0) useFallbackMusic();
-    } catch (error) {
-        console.error('MP3 detection error:', error);
-        useFallbackMusic();
     }
 }
 
-async function scanFolderRecursive(folderPath, currentDepth, maxDepth, maxFiles) {
-    const tracks = [];
-    if (currentDepth > maxDepth || tracks.length >= maxFiles) return tracks;
-    
-    const currentFiles = await scanCurrentFolder(folderPath);
-    tracks.push(...currentFiles);
-    if (tracks.length >= maxFiles) return tracks.slice(0, maxFiles);
-    
-    const subfolders = generateSubfolderPatterns();
-    for (const subfolder of subfolders) {
-        if (tracks.length >= maxFiles) break;
-        const subPath = `${folderPath}${subfolder}/`;
-        const subFiles = await scanCurrentFolder(subPath);
-        if (subFiles.length > 0) {
-            tracks.push(...subFiles);
-            const deepFiles = await scanFolderRecursive(subPath, currentDepth + 1, maxDepth, maxFiles - tracks.length);
-            tracks.push(...deepFiles);
-        }
-    }
-    return tracks.slice(0, maxFiles);
-}
+async function tryLoadManifest() {
+    try {
+        const res = await fetch(CONFIG.music.manifestPath, { cache: "no-cache" });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (!data.romantic && !data.funny) return false;
 
-async function scanCurrentFolder(folderPath) {
-    const tracks = [];
-    const possibleFiles = [];
-    
-    for (let i = 1; i <= 50; i++) {
-        possibleFiles.push(
-            `${folderPath}${i}.mp3`,
-            `${folderPath}song${i}.mp3`,
-            `${folderPath}song-${i}.mp3`,
-            `${folderPath}track${i}.mp3`,
-            `${folderPath}${String(i).padStart(2, '0')}.mp3`
-        );
-    }
-    
-    ['song.mp3', 'track.mp3', 'music.mp3', 'romantic.mp3', 'funny.mp3', 'love.mp3'].forEach(name => {
-        possibleFiles.push(`${folderPath}${name}`);
-    });
-    
-    const batchSize = CONFIG.music.scanBatchSize || 10;
-    for (let i = 0; i < possibleFiles.length; i += batchSize) {
-        const batch = possibleFiles.slice(i, i + batchSize);
-        const results = await Promise.all(batch.map(async (filePath) => {
-            if (await fileExists(filePath)) {
-                return { path: filePath, title: extractTitleFromPath(filePath), folder: extractFolderFromPath(filePath) };
-            }
-            return null;
+        musicTracks.romantic = (data.romantic || []).map(t => ({
+            path: t.path,
+            title: t.title || extractTitleFromPath(t.path),
+            folder: extractFolderFromPath(t.path)
         }));
-        tracks.push(...results.filter(r => r !== null));
+        musicTracks.funny = (data.funny || []).map(t => ({
+            path: t.path,
+            title: t.title || extractTitleFromPath(t.path),
+            folder: extractFolderFromPath(t.path)
+        }));
+
+        console.log(`✅ Manifest loaded: ${musicTracks.romantic.length} romantic + ${musicTracks.funny.length} funny`);
+        if (CONFIG.music.cacheEnabled) saveMusicCache();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function probeFolderForMP3s(folderPath) {
+    // Only probes 1.mp3, 2.mp3 ... N.mp3 - minimal 404s
+    const max = CONFIG.music.scanMaxPerFolder || 20;
+    const tracks = [];
+    for (let i = 1; i <= max; i++) {
+        const path = `${folderPath}${i}.mp3`;
+        try {
+            const res = await fetch(path, { method: "HEAD", cache: "force-cache" });
+            if (res.ok) {
+                tracks.push({ path, title: extractTitleFromPath(path), folder: extractFolderFromPath(path) });
+            } else {
+                // Stop early if we hit a missing number (avoids checking all 20)
+                if (i > 3 && tracks.length === 0) break;
+            }
+        } catch { break; }
     }
     return tracks;
 }
 
-async function detectMP3FilesInFolder(folderPath) {
-    return await scanCurrentFolder(folderPath);
-}
-
-function generateSubfolderPatterns() {
-    const patterns = [];
-    for (let year = 2020; year <= 2026; year++) patterns.push(String(year));
-    patterns.push('favorites', 'fav', 'best', 'top', 'playlist', 'love', 'classics', 'new', 'old', 'recent', 'pop', 'rock', 'jazz', 'ballad', 'mix', 'collection', 'album', 'vol1', 'vol2', '1', '2', '3', '4', '5');
-    return patterns;
-}
-
 function extractTitleFromPath(filePath) {
-    const fileName = filePath.split('/').pop();
-    let title = fileName.replace(/\.mp3$/i, '').replace(/[-_]/g, ' ');
-    return title.replace(/\b\w/g, c => c.toUpperCase());
+    const name = filePath.split("/").pop().replace(/\.mp3$/i, "").replace(/[-_]/g, " ");
+    return name.replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function extractFolderFromPath(filePath) {
-    const parts = filePath.split('/');
-    return parts.length > 2 ? parts[parts.length - 2] : '';
-}
-
-async function fileExists(url) {
-    try {
-        const response = await fetch(url, { method: 'HEAD', cache: 'force-cache' });
-        return response.ok;
-    } catch { return false; }
-}
-
-function getFileNameWithoutExtension(path) {
-    const fileName = path.split('/').pop();
-    return fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, ' ');
+    const parts = filePath.split("/");
+    return parts.length > 2 ? parts[parts.length - 2] : "";
 }
 
 function loadCachedMusicFiles() {
     try {
-        const timestamp = localStorage.getItem(MUSIC_CACHE_TIMESTAMP_KEY);
-        if (!timestamp) return false;
-        const age = Date.now() - parseInt(timestamp, 10);
-        const expiryMs = (CONFIG.music.cacheExpiryHours || 24) * 60 * 60 * 1000;
-        if (age > expiryMs) {
+        const ts = localStorage.getItem(MUSIC_CACHE_TIMESTAMP_KEY);
+        if (!ts) return false;
+        const age = Date.now() - parseInt(ts, 10);
+        if (age > (CONFIG.music.cacheExpiryHours || 24) * 3600000) {
             localStorage.removeItem(MUSIC_CACHE_KEY);
             localStorage.removeItem(MUSIC_CACHE_TIMESTAMP_KEY);
             return false;
         }
-        const cached = localStorage.getItem(MUSIC_CACHE_KEY);
-        if (!cached) return false;
-        const data = JSON.parse(cached);
-        musicTracks.romantic = data.romantic || [];
-        musicTracks.funny = data.funny || [];
-        return (musicTracks.romantic.length > 0 || musicTracks.funny.length > 0);
+        const raw = localStorage.getItem(MUSIC_CACHE_KEY);
+        if (!raw) return false;
+        const d = JSON.parse(raw);
+        musicTracks.romantic = d.romantic || [];
+        musicTracks.funny    = d.funny    || [];
+        return musicTracks.romantic.length > 0 || musicTracks.funny.length > 0;
     } catch { return false; }
 }
 
 function saveMusicCache() {
     try {
-        localStorage.setItem(MUSIC_CACHE_KEY, JSON.stringify({ romantic: musicTracks.romantic, funny: musicTracks.funny }));
+        localStorage.setItem(MUSIC_CACHE_KEY, JSON.stringify(musicTracks));
         localStorage.setItem(MUSIC_CACHE_TIMESTAMP_KEY, String(Date.now()));
-        console.log('💾 Music cache saved');
-    } catch (error) { console.error('Cache save error:', error); }
+    } catch (e) { console.warn("Cache save failed:", e); }
 }
 
 function clearMusicCache() {
     localStorage.removeItem(MUSIC_CACHE_KEY);
     localStorage.removeItem(MUSIC_CACHE_TIMESTAMP_KEY);
-    console.log('🗑️ Music cache cleared');
-}
-
-function useFallbackMusic() {
-    console.log('⚠️ No MP3 files found, using fallback');
-    musicTracks.romantic = [
-        { path: 'music/romantic/1.mp3', title: 'Romantic Song 1', folder: 'romantic' },
-        { path: 'music/romantic/2.mp3', title: 'Romantic Song 2', folder: 'romantic' },
-        { path: 'music/romantic/3.mp3', title: 'Romantic Song 3', folder: 'romantic' }
-    ];
-    musicTracks.funny = [
-        { path: 'music/funny/1.mp3', title: 'Funny Song 1', folder: 'funny' },
-        { path: 'music/funny/2.mp3', title: 'Funny Song 2', folder: 'funny' },
-        { path: 'music/funny/3.mp3', title: 'Funny Song 3', folder: 'funny' }
-    ];
+    console.log("🗑️ Music cache cleared");
 }
 
 window.clearMusicCache = clearMusicCache;
 
-/* HTML5 Audio Player */
+/* ==========================================
+   HTML5 AUDIO PLAYER
+   ========================================== */
+
 function initMusicPlayer() {
-    bgMusicElement = document.getElementById('bg-music');
-    panicSoundElement = document.getElementById('panic-sound');
-    
+    bgMusicElement    = document.getElementById("bg-music");
+    panicSoundElement = document.getElementById("panic-sound");
+
     if (!bgMusicElement || !panicSoundElement) {
-        console.error('❌ Audio elements not found');
+        console.error("❌ <audio id=\"bg-music\"> or <audio id=\"panic-sound\"> not found in HTML");
         return false;
     }
-    
-    bgMusicElement.addEventListener('ended', playNextSelectedTrack);
-    bgMusicElement.addEventListener('play', () => {
-        isMusicPlaying = true;
-        updateMusicPlayerUI();
-    });
-    bgMusicElement.addEventListener('pause', () => {
-        isMusicPlaying = false;
-        updateMusicPlayerUI();
-    });
-    bgMusicElement.addEventListener('error', (e) => {
-        console.error('Playback error:', e);
-        playNextSelectedTrack();
-    });
-    
-    bgMusicElement.volume = 0.7;
+
+    bgMusicElement.addEventListener("ended",  playNextSelectedTrack);
+    bgMusicElement.addEventListener("play",   () => { isMusicPlaying = true;  updateMusicPlayerUI(); });
+    bgMusicElement.addEventListener("pause",  () => { isMusicPlaying = false; updateMusicPlayerUI(); });
+    bgMusicElement.addEventListener("error",  () => { console.warn("Track error, skipping"); playNextSelectedTrack(); });
+
+    bgMusicElement.volume    = 0.7;
     panicSoundElement.volume = 1.0;
-    
-    console.log('🎵 MP3 player initialized');
+    console.log("🎵 MP3 player ready");
     return true;
 }
 
 function playSelectedMusic() {
     if (!bgMusicElement) return;
-    
     const tracks = musicTracks[currentMood];
     if (!tracks || tracks.length === 0) return;
-    
     if (currentTrackIndex >= tracks.length) currentTrackIndex = 0;
-    
+
     const track = tracks[currentTrackIndex];
-    console.log(`🎵 Playing: ${track.title}`);
-    
     bgMusicElement.src = track.path;
-    bgMusicElement.play()
-        .then(() => {
-            isMusicPlaying = true;
-            updateMusicPlayerUI();
-        })
-        .catch(() => {
-            document.addEventListener('click', () => {
-                bgMusicElement.play().catch(() => {});
-            }, { once: true });
-        });
+    bgMusicElement.play().catch(() => {
+        // Browser blocked autoplay - play on next user gesture
+        document.addEventListener("click", () => bgMusicElement.play().catch(() => {}), { once: true });
+    });
 }
 
-function pauseMusic() {
-    if (bgMusicElement) {
-        bgMusicElement.pause();
-        isMusicPlaying = false;
-        updateMusicPlayerUI();
-    }
-}
-
-function stopMusic() {
-    pauseMusic();
-}
+function pauseMusic()  { if (bgMusicElement) { bgMusicElement.pause(); } }
+function stopMusic()   { pauseMusic(); }
+function resumeMusic() { if (bgMusicElement && !isMusicPlaying) bgMusicElement.play().catch(() => {}); }
 
 function playNextSelectedTrack() {
     const tracks = musicTracks[currentMood];
@@ -1117,186 +966,107 @@ function playPreviousTrack() {
 }
 
 function setSelectedMusicFromVibe(mood, options = {}) {
-    currentMood = mood;
+    const normalized = normalizeMood(mood);
+    currentMood = normalized;
     currentTrackIndex = 0;
-    
-    const romanticBtn = document.getElementById('mood-romantic-btn');
-    const funnyBtn = document.getElementById('mood-funny-btn');
-    
+
+    const romanticBtn = document.getElementById("mood-romantic-btn");
+    const funnyBtn    = document.getElementById("mood-funny-btn");
     if (romanticBtn && funnyBtn) {
-        if (mood === 'romantic') {
-            romanticBtn.classList.add('active');
-            funnyBtn.classList.remove('active');
-        } else {
-            funnyBtn.classList.add('active');
-            romanticBtn.classList.remove('active');
-        }
+        romanticBtn.classList.toggle("active", normalized === "romantic");
+        funnyBtn.classList.toggle("active",    normalized === "funny");
     }
-    
-    if (options.allowPlaybackResume) {
-        playSelectedMusic();
-    }
-    
+
+    if (options.allowPlaybackResume) playSelectedMusic();
     updateMusicPlayerUI();
+}
+
+function updateMusicPlayerUI() {
+    const tracks = musicTracks[currentMood];
+    const track  = tracks && tracks[currentTrackIndex];
+
+    const titleEl = document.getElementById("track-title");
+    if (titleEl) titleEl.textContent = track ? track.title : "—";
+
+    const moodEl = document.getElementById("mood-label");
+    if (moodEl) moodEl.textContent = currentMood.charAt(0).toUpperCase() + currentMood.slice(1);
+
+    const posEl = document.getElementById("track-position");
+    if (posEl) posEl.textContent = tracks ? `Track ${currentTrackIndex + 1}/${tracks.length}` : "";
+
+    const playBtn   = document.getElementById("player-play-btn");
+    if (playBtn) {
+        playBtn.querySelector(".icon-play")?.classList.toggle("hidden",  isMusicPlaying);
+        playBtn.querySelector(".icon-pause")?.classList.toggle("hidden", !isMusicPlaying);
+    }
+}
+
+function setupMusicPlayerControls() {
+    document.getElementById("player-play-btn")?.addEventListener("click", () => {
+        if (isMusicPlaying) pauseMusic(); else playSelectedMusic();
+    });
+    document.getElementById("player-prev-btn")?.addEventListener("click", playPreviousTrack);
+    document.getElementById("player-next-btn")?.addEventListener("click", playNextSelectedTrack);
+    document.getElementById("mood-romantic-btn")?.addEventListener("click", () => {
+        setSelectedMusicFromVibe("romantic", { allowPlaybackResume: true });
+    });
+    document.getElementById("mood-funny-btn")?.addEventListener("click", () => {
+        setSelectedMusicFromVibe("funny", { allowPlaybackResume: true });
+    });
 }
 
 function playPanicAlert() {
     panicMode = true;
-    if (bgMusicElement) {
-        bgMusicElement.pause();
-        isMusicPlaying = false;
-    }
-    
+    if (bgMusicElement) { bgMusicElement.pause(); }
     if (panicSoundElement && CONFIG.music.panicSound) {
-        panicSoundElement.src = CONFIG.music.panicSound;
+        panicSoundElement.src  = CONFIG.music.panicSound;
         panicSoundElement.loop = true;
         panicSoundElement.play().catch(() => {});
     }
 }
 
-function stopPanicAlert() {
+function stopPanicAudio() {
     if (panicSoundElement) {
         panicSoundElement.pause();
         panicSoundElement.currentTime = 0;
     }
 }
 
-function hidePanicAlert() {
-    panicMode = false;
-    stopPanicAlert();
-    panicModal.classList.add("hidden");
-}
-
-function updateMusicPlayerUI() {
-    const tracks = musicTracks[currentMood];
-    if (!tracks || tracks.length === 0) return;
-    
-    const currentTrack = tracks[currentTrackIndex];
-    
-    const trackTitleEl = document.getElementById('track-title');
-    if (trackTitleEl && currentTrack) {
-        trackTitleEl.textContent = currentTrack.title;
-        if (currentTrack.folder) {
-            trackTitleEl.title = `From: ${currentTrack.folder}`;
-        }
-    }
-    
-    const moodLabelEl = document.getElementById('mood-label');
-    if (moodLabelEl) {
-        moodLabelEl.textContent = currentMood.charAt(0).toUpperCase() + currentMood.slice(1);
-    }
-    
-    const trackPosEl = document.getElementById('track-position');
-    if (trackPosEl) {
-        trackPosEl.textContent = `Track ${currentTrackIndex + 1}/${tracks.length}`;
-    }
-    
-    const playBtn = document.getElementById('player-play-btn');
-    if (playBtn) {
-        const playIcon = playBtn.querySelector('.icon-play');
-        const pauseIcon = playBtn.querySelector('.icon-pause');
-        
-        if (isMusicPlaying) {
-            playIcon?.classList.add('hidden');
-            pauseIcon?.classList.remove('hidden');
-        } else {
-            playIcon?.classList.remove('hidden');
-            pauseIcon?.classList.add('hidden');
-        }
-    }
-}
-
-function setupMusicPlayerControls() {
-    const playBtn = document.getElementById('player-play-btn');
-    if (playBtn) {
-        playBtn.addEventListener('click', () => {
-            if (isMusicPlaying) pauseMusic();
-            else playSelectedMusic();
-        });
-    }
-    
-    const prevBtn = document.getElementById('player-prev-btn');
-    if (prevBtn) prevBtn.addEventListener('click', playPreviousTrack);
-    
-    const nextBtn = document.getElementById('player-next-btn');
-    if (nextBtn) nextBtn.addEventListener('click', playNextSelectedTrack);
-    
-    const romanticBtn = document.getElementById('mood-romantic-btn');
-    if (romanticBtn) {
-        romanticBtn.addEventListener('click', () => {
-            setSelectedMusicFromVibe('romantic', { allowPlaybackResume: true });
-        });
-    }
-    
-    const funnyBtn = document.getElementById('mood-funny-btn');
-    if (funnyBtn) {
-        funnyBtn.addEventListener('click', () => {
-            setSelectedMusicFromVibe('funny', { allowPlaybackResume: true });
-        });
-    }
-    
-    console.log('🎮 Music controls ready');
-}
-
-function normalizeMood(value) {
-    const val = String(value || "").toLowerCase().trim();
-    return (val === "funny" || val === "laugh") ? "funny" : "romantic";
-}
-
-function isRomanceSceneVisible() {
-    const trapVisible = !document.getElementById("screen-trap").classList.contains("hidden");
-    const mainVisible = !document.getElementById("screen-main").classList.contains("hidden");
-    return trapVisible || mainVisible;
-}
-
-function isVerifySceneVisible() {
-    return !document.getElementById("screen-verify").classList.contains("hidden");
-}
-
-function primeAudioFromGesture() {
-    if (audioPrimed) return;
-    audioPrimed = true;
-    
-    if (bgMusicElement) {
-        bgMusicElement.volume = 0;
-        bgMusicElement.play().then(() => {
-            bgMusicElement.pause();
-            bgMusicElement.volume = 0.7;
-        }).catch(() => {});
-    }
-}
+/* Stubs for functions called elsewhere that no longer need real bodies */
+function primeAudioFromGesture() { audioPrimed = true; }
+function startMusicStatePersistence() {}
+function stopMusicStatePersistence()  { clearTimeout(musicStateSaveTimerId); }
 
 function saveMusicPlaybackState(force = false) {
     if (panicMode || !isRomanceSceneVisible()) return;
-    
-    clearTimeout(musicStateSaveTimerId);
-    
     const doSave = () => {
-        const session = loadAppSession();
-        if (session) {
-            session.mood = currentMood;
-            session.trackIndex = currentTrackIndex;
-            saveAppSession(session);
-        }
+        const s = loadAppSession();
+        if (s) { s.mood = currentMood; s.trackIndex = currentTrackIndex; saveAppSession(s); }
     };
-    
-    if (force) {
-        doSave();
-    } else {
-        musicStateSaveTimerId = setTimeout(doSave, 1000);
-    }
+    if (force) doSave();
+    else { clearTimeout(musicStateSaveTimerId); musicStateSaveTimerId = setTimeout(doSave, 1000); }
 }
 
-function startMusicStatePersistence() {
-    // MP3 player doesn't need interval persistence like YouTube
-    // State is saved on key events
+function isRomanceSceneVisible() {
+    const trap = document.getElementById("screen-trap");
+    const main = document.getElementById("screen-main");
+    return (trap && !trap.classList.contains("hidden")) || (main && !main.classList.contains("hidden"));
 }
 
-function stopMusicStatePersistence() {
-    clearTimeout(musicStateSaveTimerId);
+function isVerifySceneVisible() {
+    const el = document.getElementById("screen-verify");
+    return el && !el.classList.contains("hidden");
 }
 
+/* ==========================================
+   Trap buttons (yes/no)
+   ========================================== */
 const noTexts = [
+    "No? Are you sure, cutie?",
+    "Aww, try again my love?",
+    "You just broke my tiny heart.",
+    "What if I bring flower Wine and 100USD 💰💯💵?",
+    "Still no? aahhha why",
     "Plot twist: I am extra handsome today.",
     "One more chance for this husband?",
     "Say yes and I will do dishes for a week.",
@@ -1528,8 +1298,8 @@ btnYes.addEventListener("click", () => {
     primeAudioFromGesture();
     
     // Start music immediately with aggressive retry
-    requestMusicAutoplay("yes-click", 4, 900);
-    scheduleBackgroundMusicRecovery(2500);
+    primeAudioFromGesture();
+    setTimeout(() => { if (!isMusicPlaying && !panicMode) playSelectedMusic(); }, 200);
     
     // Also try immediate play
     setTimeout(() => {
@@ -2335,7 +2105,7 @@ async function startDriveSignInFlow(prompt = "consent") {
         setDriveStatus("Loading our memories… 🌻");
         await loadDriveMediaAfterAuth();
         if (!panicMode && isRomanceSceneVisible()) {
-            requestMusicAutoplay("drive-auth-return", 3, 900);
+            setTimeout(() => { if (!isMusicPlaying && !panicMode) playSelectedMusic(); }, 500);
         }
     } catch (error) {
         console.error(error);
@@ -2412,7 +2182,7 @@ function setupDriveAuth() {
         loadDriveMediaAfterAuth()
             .then(() => {
                 if (!panicMode && isRomanceSceneVisible()) {
-                    requestMusicAutoplay("drive-session-restored", 3, 900);
+                    setTimeout(() => { if (!isMusicPlaying && !panicMode) playSelectedMusic(); }, 500);
                 }
             })
             .catch((error) => {
@@ -2951,7 +2721,7 @@ function buildDriveSlideElement(media, direction, renderToken) {
         return wrapper;
     }
 
-    if (media.isVideo && player && isPlayerReady) {
+    if (media.isVideo) {
         player.pauseVideo();
     }
 
@@ -3041,7 +2811,7 @@ function buildSlideElement(media, direction, renderToken) {
 
     const wrapper = buildSlideWrapper(direction);
     if (media.isVideo) {
-        if (player && isPlayerReady) {
+        if (true) {
             player.pauseVideo();
         }
 
@@ -3086,8 +2856,8 @@ function closeLightbox() {
     lightbox.classList.remove("active");
     lbContainer.innerHTML = "";
 
-    if (player && isPlayerReady && isMusicPlaying && !panicMode) {
-        player.playVideo();
+    if (isMusicPlaying && !panicMode) {
+        resumeMusic();
     }
 }
 
@@ -3355,12 +3125,7 @@ initializeApp();
         
         if (prevBtn) {
             prevBtn.addEventListener('click', function() {
-                if (typeof selectedMusicList !== 'undefined' && selectedMusicList.length) {
-                    window.selectedMusicIndex = (window.selectedMusicIndex - 1 + selectedMusicList.length) % selectedMusicList.length;
-                    if (typeof startSelectedTrack === 'function') {
-                        startSelectedTrack();
-                    }
-                }
+                playPreviousTrack();
             });
         }
         
@@ -3480,33 +3245,18 @@ initializeApp();
     // Start watching
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize MP3 player first
             initMP3PlayerOnLoad();
             setTimeout(watchMainScene, 200);
         });
     } else {
-        // Initialize MP3 player first
         initMP3PlayerOnLoad();
         setTimeout(watchMainScene, 200);
     }
 })();
 
-/* ==========================================
-   MP3 Player Initialization
-   ========================================== */
 async function initMP3PlayerOnLoad() {
-    console.log('🎵 Initializing MP3 Player...');
-    
-    // Step 1: Auto-detect MP3 files
+    console.log("🎵 Starting MP3 player...");
     await autoDetectMusicFiles();
-    
-    // Step 2: Initialize audio player
-    const musicReady = initMusicPlayer();
-    if (musicReady) {
-        setupMusicPlayerControls();
-        console.log('✅ MP3 Player ready!');
-    } else {
-        console.error('❌ MP3 Player initialization failed');
-    }
+    const ready = initMusicPlayer();
+    if (ready) setupMusicPlayerControls();
 }
-
