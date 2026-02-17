@@ -1296,6 +1296,7 @@ function stopMusicStatePersistence() {
     clearTimeout(musicStateSaveTimerId);
 }
 
+const noTexts = [
     "Plot twist: I am extra handsome today.",
     "One more chance for this husband?",
     "Say yes and I will do dishes for a week.",
