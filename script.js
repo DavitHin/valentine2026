@@ -161,6 +161,25 @@ const DRIVE_BLOB_CACHE_NAME = "valentine_drive_blob_cache_v1";
 const DRIVE_BLOB_CACHE_META_KEY = "valentine_drive_blob_cache_meta_v1";
 const MUSIC_STATE_MAX_AGE_MS = Math.max(30 * 60 * 1000, getAppSessionMaxMs());
 const MUSIC_STATE_SAVE_INTERVAL_MS = 2500;
+const MUSIC_CACHE_KEY = "valentine_music_cache_v1";
+const MUSIC_CACHE_TIMESTAMP_KEY = "valentine_music_cache_timestamp_v1";
+
+let bgMusicElement = null;
+let panicSoundElement = null;
+let panicMode = false;
+let isMusicPlaying = false;
+let audioPrimed = false;
+let currentMood = "romantic";
+let selectedMood = "romantic";
+let currentTrackIndex = 0;
+let selectedErrorCount = 0;
+let shouldResumeSelectedMusicOnGesture = false;
+let musicStateSaveTimerId = null;
+
+const musicTracks = {
+    romantic: [],
+    funny: []
+};
 
 /* ==========================================
    Date input UX (limit + auto move)
@@ -929,12 +948,21 @@ function initMusicPlayer() {
 
     bgMusicElement.volume    = 0.7;
     panicSoundElement.volume = 1.0;
+
+    if (shouldResumeSelectedMusicOnGesture && !panicMode && isRomanceSceneVisible()) {
+        shouldResumeSelectedMusicOnGesture = false;
+        setTimeout(playSelectedMusic, 0);
+    }
+
     console.log("🎵 MP3 player ready");
     return true;
 }
 
 function playSelectedMusic() {
-    if (!bgMusicElement) return;
+    if (!bgMusicElement) {
+        shouldResumeSelectedMusicOnGesture = true;
+        return;
+    }
     const tracks = musicTracks[currentMood];
     if (!tracks || tracks.length === 0) return;
     if (currentTrackIndex >= tracks.length) currentTrackIndex = 0;
@@ -968,6 +996,7 @@ function playPreviousTrack() {
 function setSelectedMusicFromVibe(mood, options = {}) {
     const normalized = normalizeMood(mood);
     currentMood = normalized;
+    selectedMood = normalized;
     currentTrackIndex = 0;
 
     const romanticBtn = document.getElementById("mood-romantic-btn");
@@ -2722,7 +2751,9 @@ function buildDriveSlideElement(media, direction, renderToken) {
     }
 
     if (media.isVideo) {
-        player.pauseVideo();
+        if (typeof player !== "undefined" && player && typeof player.pauseVideo === "function") {
+            player.pauseVideo();
+        }
     }
 
     const quality = getSelectedMediaQuality();
@@ -2811,7 +2842,7 @@ function buildSlideElement(media, direction, renderToken) {
 
     const wrapper = buildSlideWrapper(direction);
     if (media.isVideo) {
-        if (true) {
+        if (typeof player !== "undefined" && player && typeof player.pauseVideo === "function") {
             player.pauseVideo();
         }
 
